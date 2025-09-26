@@ -438,28 +438,42 @@ function parseLabelText(rawText){
 }
 
 // ---------- Barcode (Quagga) ----------
-window.__quaggaRunning = false;
-window.__quaggaHandlers = {};
+const __quaggaState = window.__quaggaState = window.__quaggaState || {
+  running: false,
+  handlers: { processed: null, detected: null }
+};
+
+function resetQuaggaHandlers(){
+  __quaggaState.handlers = { processed: null, detected: null };
+  window.__quaggaHandlers = __quaggaState.handlers;
+}
+
+function setQuaggaRunning(isRunning){
+  __quaggaState.running = Boolean(isRunning);
+  window.__quaggaRunning = __quaggaState.running;
+}
+
+resetQuaggaHandlers();
+setQuaggaRunning(false);
 
 function startBarcode(){
-  if(!window.Quagga){ toast('QuaggaJS не загрузился', true); return; }
-  if(window.__quaggaRunning){ toast('Сканирование уже запущено'); return; }
+  const quagga = window.Quagga;
+  if(!quagga){ toast('QuaggaJS не загрузился', true); return; }
+  if(__quaggaState.running){ toast('Сканирование уже запущено'); return; }
 
   const container = document.getElementById('barcode-area');
   if(!container){ toast('Не найден контейнер камеры', true); return; }
 
-  // Make sure the tab is visible
   const tab = document.getElementById('tab-barcode');
   if(tab && tab.style.display === 'none'){ tab.style.display = 'block'; }
 
-  // Clean container
   container.innerHTML = '';
   container.style.boxShadow = 'none';
-  window.__quaggaHandlers = {};
+  resetQuaggaHandlers();
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-  Quagga.init({
+  quagga.init({
     inputStream: {
       type: "LiveStream",
       target: container,
@@ -478,6 +492,7 @@ function startBarcode(){
     if (err) {
       console.log(err);
       toast('Камера недоступна: ' + err.message, true);
+      stopBarcode(true);
       return;
     }
 
@@ -498,31 +513,42 @@ function startBarcode(){
       }
     };
 
-    window.__quaggaHandlers = { onProcessed, onDetected };
-    Quagga.onProcessed(onProcessed);
-    Quagga.onDetected(onDetected);
+    __quaggaState.handlers.processed = onProcessed;
+    __quaggaState.handlers.detected = onDetected;
+    quagga.onProcessed(onProcessed);
+    quagga.onDetected(onDetected);
 
-    Quagga.start();
-    window.__quaggaRunning = true;
+    quagga.start();
+    setQuaggaRunning(true);
     toast('Сканирование запущено');
   });
 }
 
-function stopBarcode(){
+function stopBarcode(eventOrSilent = false){
   try{
-    if(window.Quagga && window.__quaggaRunning){
-      const { onProcessed, onDetected } = window.__quaggaHandlers;
-      if(onProcessed && Quagga.offProcessed){ Quagga.offProcessed(onProcessed); }
-      else if(Quagga.offProcessed){ Quagga.offProcessed(); }
-      if(onDetected && Quagga.offDetected){ Quagga.offDetected(onDetected); }
-      else if(Quagga.offDetected){ Quagga.offDetected(); }
-      window.__quaggaHandlers = {};
-      Quagga.stop();
-      window.__quaggaRunning = false;
+    const silent = eventOrSilent === true;
+    const quagga = window.Quagga;
+    const { processed, detected } = __quaggaState.handlers;
+
+    if(quagga){
+      if(processed && typeof quagga.offProcessed === 'function') quagga.offProcessed(processed);
+      else if(typeof quagga.offProcessed === 'function') quagga.offProcessed();
+
+      if(detected && typeof quagga.offDetected === 'function') quagga.offDetected(detected);
+      else if(typeof quagga.offDetected === 'function') quagga.offDetected();
+
+      if(__quaggaState.running && typeof quagga.stop === 'function') quagga.stop();
     }
+
+    resetQuaggaHandlers();
+    setQuaggaRunning(false);
+
     const container = document.getElementById('barcode-area');
-    if(container) container.style.boxShadow = "none";
-    toast('Сканирование остановлено');
+    if(container){
+      container.style.boxShadow = 'none';
+    }
+
+    if(!silent) toast('Сканирование остановлено');
   }catch(e){
     console.log(e);
   }
