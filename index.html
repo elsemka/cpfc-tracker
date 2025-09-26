@@ -45,8 +45,8 @@
   .chip{display:inline-block;background:#1b1b20;border:1px solid #2a2a30;border-radius:999px;padding:6px 10px;font-size:12px;margin-right:6px}
 </style>
 <!-- External libs -->
-<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 <header>
@@ -829,12 +829,7 @@ function setupPWA(){
   document.getElementById('app-manifest').setAttribute('href', url);
 
   if('serviceWorker' in navigator){
-    const swCode = `self.addEventListener('install',e=>{self.skipWaiting();});
-self.addEventListener('activate',e=>{clients.claim();});
-self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match('offline')))});`;
-    const swBlob = new Blob([swCode], {type:'text/javascript'});
-    const swUrl = URL.createObjectURL(swBlob);
-    navigator.serviceWorker.register(swUrl).catch(()=>{});
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
   }
 }
 
