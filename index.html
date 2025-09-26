@@ -438,10 +438,12 @@ function parseLabelText(rawText){
 }
 
 // ---------- Barcode (Quagga) ----------
-let quaggaRunning = false;
+window.__quaggaRunning = Boolean(window.__quaggaRunning);
+window.__quaggaHandlers = window.__quaggaHandlers || { detected: null, processed: null };
 
 function startBarcode(){
   if(!window.Quagga){ toast('QuaggaJS не загрузился', true); return; }
+  if(window.__quaggaRunning){ toast('Сканирование уже запущено'); return; }
   const container = document.getElementById('barcode-area');
   if(!container){ toast('Не найден контейнер камеры', true); return; }
 
@@ -453,6 +455,19 @@ function startBarcode(){
   container.innerHTML = '';
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  const resetHandlers = () => {
+    if(window.__quaggaHandlers.processed){
+      Quagga.offProcessed && Quagga.offProcessed(window.__quaggaHandlers.processed);
+      window.__quaggaHandlers.processed = null;
+    }
+    if(window.__quaggaHandlers.detected){
+      Quagga.offDetected && Quagga.offDetected(window.__quaggaHandlers.detected);
+      window.__quaggaHandlers.detected = null;
+    }
+  };
+
+  resetHandlers();
 
   Quagga.init({
     inputStream: {
@@ -470,48 +485,56 @@ function startBarcode(){
     locate: true,
     decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
   }, function(err){
-    if (err) { console.log(err); toast('Камера недоступна: ' + err.message, true); return; }
-    Quagga.start(); 
+    if (err) {
+      console.log(err);
+      toast('Камера недоступна: ' + err.message, true);
+      resetHandlers();
+      return;
+    }
+
+    const onDetected = data => {
+      const code = data?.codeResult?.code;
+      if(code){
+        container.style.boxShadow = "inset 0 0 0 3px rgba(74,222,128,.6)";
+        $('#barcode-out').textContent = code;
+        // Stop after first good scan to avoid duplicates
+        stopBarcode();
+      }
+    };
+
+    const onProcessed = result => {
+      // Add simple overlay by toggling background if no result
+      if(!result || !result.boxes || result.boxes.length===0){
+        container.style.boxShadow = "inset 0 0 0 2px rgba(255,255,255,.1)";
+      }else{
+        container.style.boxShadow = "inset 0 0 0 2px rgba(45,212,191,.4)";
+      }
+    };
+
+    Quagga.onDetected(onDetected);
+    Quagga.onProcessed(onProcessed);
+
+    window.__quaggaHandlers.detected = onDetected;
+    window.__quaggaHandlers.processed = onProcessed;
+
+    Quagga.start();
     window.__quaggaRunning = true;
     toast('Сканирование запущено');
   });
-
-  // Visual feedback (optional)
-  Quagga.onProcessed(function(result) {
-    // Add simple overlay by toggling background if no result
-    if(!result || !result.boxes || result.boxes.length===0){
-      container.style.boxShadow = "inset 0 0 0 2px rgba(255,255,255,.1)";
-    }else{
-      container.style.boxShadow = "inset 0 0 0 2px rgba(45,212,191,.4)";
-    }
-  });
-
-  // Detection handler is defined elsewhere (onDetected)
 }
-
-  const videoEl = $('#barcode-video');
-  Quagga.init({
-    inputStream: { type: "LiveStream", target: videoEl, constraints:{ facingMode:"environment" } },
-    decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
-  }, function(err){
-    if (err) { console.log(err); toast('Камера недоступна', true); return; }
-    Quagga.start(); quaggaRunning = true; toast('Сканирование запущено');
-  });
-  Quagga.onDetected(data=>{
-    const code = data?.codeResult?.code;
-    if(code){
-      $('#barcode-out').textContent = code;
-      // Stop after first good scan to avoid duplicates
-      stopBarcode();
-    }
-  });
-}
-
 function stopBarcode(){
   try{
     if(window.Quagga && window.__quaggaRunning){
-      Quagga.offProcessed && Quagga.offProcessed();
-      Quagga.offDetected && Quagga.offDetected();
+      if(window.__quaggaHandlers){
+        if(window.__quaggaHandlers.processed && Quagga.offProcessed){
+          Quagga.offProcessed(window.__quaggaHandlers.processed);
+        }
+        if(window.__quaggaHandlers.detected && Quagga.offDetected){
+          Quagga.offDetected(window.__quaggaHandlers.detected);
+        }
+        window.__quaggaHandlers.processed = null;
+        window.__quaggaHandlers.detected = null;
+      }
       Quagga.stop();
       window.__quaggaRunning = false;
     }
@@ -521,8 +544,6 @@ function stopBarcode(){
   }catch(e){
     console.log(e);
   }
-}
-
 }
 
 // ---------- Weight & Recalibration ----------
