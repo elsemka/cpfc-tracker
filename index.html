@@ -438,12 +438,13 @@ function parseLabelText(rawText){
 }
 
 // ---------- Barcode (Quagga) ----------
-window.__quaggaRunning = Boolean(window.__quaggaRunning);
-window.__quaggaCleanup = typeof window.__quaggaCleanup === 'function' ? window.__quaggaCleanup : null;
+window.__quaggaRunning = false;
+window.__quaggaHandlers = {};
 
 function startBarcode(){
   if(!window.Quagga){ toast('QuaggaJS не загрузился', true); return; }
   if(window.__quaggaRunning){ toast('Сканирование уже запущено'); return; }
+
   const container = document.getElementById('barcode-area');
   if(!container){ toast('Не найден контейнер камеры', true); return; }
 
@@ -451,19 +452,17 @@ function startBarcode(){
   const tab = document.getElementById('tab-barcode');
   if(tab && tab.style.display === 'none'){ tab.style.display = 'block'; }
 
-  // Clean container and any leftovers from previous session
+  // Clean container
   container.innerHTML = '';
-  if(typeof window.__quaggaCleanup === 'function'){
-    window.__quaggaCleanup();
-    window.__quaggaCleanup = null;
-  }
+  container.style.boxShadow = 'none';
+  window.__quaggaHandlers = {};
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   Quagga.init({
     inputStream: {
       type: "LiveStream",
-      target: container,                // Quagga will inject its own <video> here
+      target: container,
       constraints: {
         facingMode: "environment",
         width: { ideal: 1280 },
@@ -471,7 +470,7 @@ function startBarcode(){
       }
     },
     locator: { patchSize: "medium", halfSample: true },
-    numOfWorkers: isIOS ? 0 : 2,        // iOS Safari needs 0
+    numOfWorkers: isIOS ? 0 : 2,
     frequency: 10,
     locate: true,
     decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
@@ -479,52 +478,45 @@ function startBarcode(){
     if (err) {
       console.log(err);
       toast('Камера недоступна: ' + err.message, true);
-      container.style.boxShadow = 'none';
       return;
     }
 
-    const onDetected = data => {
-      const code = data?.codeResult?.code;
-      if(code){
-        container.style.boxShadow = "inset 0 0 0 3px rgba(74,222,128,.6)";
-        $('#barcode-out').textContent = code;
-        // Stop after first good scan to avoid duplicates
-        stopBarcode();
-      }
-    };
-
     const onProcessed = result => {
-      if(!result || !result.boxes || result.boxes.length===0){
+      if(!result || !result.boxes || result.boxes.length === 0){
         container.style.boxShadow = "inset 0 0 0 2px rgba(255,255,255,.1)";
       }else{
         container.style.boxShadow = "inset 0 0 0 2px rgba(45,212,191,.4)";
       }
     };
 
-    Quagga.onDetected(onDetected);
-    Quagga.onProcessed(onProcessed);
-
-    window.__quaggaCleanup = () => {
-      if(Quagga.offDetected){ Quagga.offDetected(onDetected); }
-      if(Quagga.offProcessed){ Quagga.offProcessed(onProcessed); }
-      container.style.boxShadow = 'none';
+    const onDetected = data => {
+      const code = data?.codeResult?.code;
+      if(code){
+        container.style.boxShadow = "inset 0 0 0 3px rgba(74,222,128,.6)";
+        $('#barcode-out').textContent = code;
+        stopBarcode();
+      }
     };
+
+    window.__quaggaHandlers = { onProcessed, onDetected };
+    Quagga.onProcessed(onProcessed);
+    Quagga.onDetected(onDetected);
 
     Quagga.start();
     window.__quaggaRunning = true;
     toast('Сканирование запущено');
   });
 }
+
 function stopBarcode(){
   try{
     if(window.Quagga && window.__quaggaRunning){
-      if(typeof window.__quaggaCleanup === 'function'){
-        try{ window.__quaggaCleanup(); }
-        finally{ window.__quaggaCleanup = null; }
-      }else{
-        Quagga.offDetected && Quagga.offDetected();
-        Quagga.offProcessed && Quagga.offProcessed();
-      }
+      const { onProcessed, onDetected } = window.__quaggaHandlers;
+      if(onProcessed && Quagga.offProcessed){ Quagga.offProcessed(onProcessed); }
+      else if(Quagga.offProcessed){ Quagga.offProcessed(); }
+      if(onDetected && Quagga.offDetected){ Quagga.offDetected(onDetected); }
+      else if(Quagga.offDetected){ Quagga.offDetected(); }
+      window.__quaggaHandlers = {};
       Quagga.stop();
       window.__quaggaRunning = false;
     }
