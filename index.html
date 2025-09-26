@@ -438,8 +438,6 @@ function parseLabelText(rawText){
 }
 
 // ---------- Barcode (Quagga) ----------
-let quaggaRunning = false;
-
 function startBarcode(){
   if(!window.Quagga){ toast('QuaggaJS не загрузился', true); return; }
   const container = document.getElementById('barcode-area');
@@ -471,8 +469,16 @@ function startBarcode(){
     decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
   }, function(err){
     if (err) { console.log(err); toast('Камера недоступна: ' + err.message, true); return; }
-    Quagga.start(); 
+    Quagga.start();
     window.__quaggaRunning = true;
+    Quagga.onDetected(data=>{
+      const code = data?.codeResult?.code;
+      if(code){
+        $('#barcode-out').textContent = code;
+        // Stop after first good scan to avoid duplicates
+        stopBarcode();
+      }
+    });
     toast('Сканирование запущено');
   });
 
@@ -486,25 +492,7 @@ function startBarcode(){
     }
   });
 
-  // Detection handler is defined elsewhere (onDetected)
-}
-
-  const videoEl = $('#barcode-video');
-  Quagga.init({
-    inputStream: { type: "LiveStream", target: videoEl, constraints:{ facingMode:"environment" } },
-    decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
-  }, function(err){
-    if (err) { console.log(err); toast('Камера недоступна', true); return; }
-    Quagga.start(); quaggaRunning = true; toast('Сканирование запущено');
-  });
-  Quagga.onDetected(data=>{
-    const code = data?.codeResult?.code;
-    if(code){
-      $('#barcode-out').textContent = code;
-      // Stop after first good scan to avoid duplicates
-      stopBarcode();
-    }
-  });
+  // Detection handler is set after successful init above
 }
 
 function stopBarcode(){
