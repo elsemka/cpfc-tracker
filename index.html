@@ -438,6 +438,10 @@ function parseLabelText(rawText){
 }
 
 // ---------- Barcode (Quagga) ----------
+let quaggaProcessedHandler = null;
+let quaggaDetectedHandler = null;
+let barcodeLookupInFlight = false;
+
 function startBarcode(){
   if(!window.Quagga){ toast('QuaggaJS не загрузился', true); return; }
   const container = document.getElementById('barcode-area');
@@ -451,6 +455,8 @@ function startBarcode(){
   container.innerHTML = '';
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  barcodeLookupInFlight = false;
 
   Quagga.init({
     inputStream: {
@@ -469,27 +475,80 @@ function startBarcode(){
     decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
   }, function(err){
     if (err) { console.log(err); toast('Камера недоступна: ' + err.message, true); return; }
-    Quagga.start();
-    window.__quaggaRunning = true;
-    Quagga.onDetected(data=>{
+    const processedHandler = result => {
+      if(!result || !result.boxes || result.boxes.length===0){
+        container.style.boxShadow = "inset 0 0 0 2px rgba(255,255,255,.1)";
+      }else{
+        container.style.boxShadow = "inset 0 0 0 2px rgba(45,212,191,.4)";
+      }
+    };
+
+    const detectedHandler = async data => {
       const code = data?.codeResult?.code;
-      if(code){
-        $('#barcode-out').textContent = code;
-        // Stop after first good scan to avoid duplicates
+      if(!code || barcodeLookupInFlight){ return; }
+      barcodeLookupInFlight = true;
+      $('#barcode-out').textContent = code;
+      toast('Сканируем... ищем в OpenFoodFacts');
+      try{
+        const resp = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
+        if(!resp.ok){ throw new Error(resp.statusText || 'HTTP ' + resp.status); }
+        const json = await resp.json();
+        if(json.status === 1 && json.product){
+          const product = json.product;
+          const nutr = product.nutriments || {};
+          const pick = key => {
+            const val = nutr[key];
+            return (val === undefined || val === null || val === '') ? null : Number(val);
+          };
+          let kcal = pick('energy-kcal_100g');
+          if(kcal == null){
+            const energyKJ = pick('energy_100g');
+            if(energyKJ != null){
+              kcal = Math.round(Number(energyKJ)/4.184);
+            }
+          }
+          const protein = pick('proteins_100g');
+          const fat = pick('fat_100g');
+          const carbs = pick('carbohydrates_100g');
+
+          const roundVal = (val, digits=1) => val==null ? '' : Number(val.toFixed(digits));
+          if(kcal!=null) $('#add-kcal').value = Math.round(kcal);
+          if(protein!=null) $('#add-p').value = roundVal(protein,1);
+          if(fat!=null) $('#add-f').value = roundVal(fat,1);
+          if(carbs!=null) $('#add-c').value = roundVal(carbs,1);
+
+          const nameParts = [product.product_name || product.generic_name || 'Продукт'];
+          if(product.brands){ nameParts.unshift(product.brands); }
+          let finalName = nameParts.filter(Boolean).join(' ');
+          if(!finalName.toLowerCase().includes(code.toLowerCase())){
+            finalName = `${finalName} (EAN ${code})`;
+          }
+          $('#add-name').value = finalName.trim();
+          toast('Заполнили данные из OpenFoodFacts');
+        }else{
+          toast('OFF не нашёл продукт — заполни вручную', true);
+        }
+      }catch(err){
+        console.error(err);
+        toast('Ошибка запроса к OpenFoodFacts', true);
+      }finally{
+        barcodeLookupInFlight = false;
         stopBarcode();
       }
-    });
-    toast('Сканирование запущено');
-  });
+    };
 
-  // Visual feedback (optional)
-  Quagga.onProcessed(function(result) {
-    // Add simple overlay by toggling background if no result
-    if(!result || !result.boxes || result.boxes.length===0){
-      container.style.boxShadow = "inset 0 0 0 2px rgba(255,255,255,.1)";
-    }else{
-      container.style.boxShadow = "inset 0 0 0 2px rgba(45,212,191,.4)";
+    if(typeof Quagga.onProcessed === 'function'){
+      Quagga.onProcessed(processedHandler);
+      quaggaProcessedHandler = processedHandler;
     }
+    if(typeof Quagga.onDetected === 'function'){
+      Quagga.onDetected(detectedHandler);
+      quaggaDetectedHandler = detectedHandler;
+    }
+
+    Quagga.start();
+    window.__quaggaRunning = true;
+    toast('Сканирование запущено');
   });
 
   // Detection handler is set after successful init above
@@ -498,8 +557,14 @@ function startBarcode(){
 function stopBarcode(){
   try{
     if(window.Quagga && window.__quaggaRunning){
-      Quagga.offProcessed && Quagga.offProcessed();
-      Quagga.offDetected && Quagga.offDetected();
+      if(typeof Quagga.offProcessed === 'function' && quaggaProcessedHandler){
+        Quagga.offProcessed(quaggaProcessedHandler);
+        quaggaProcessedHandler = null;
+      }
+      if(typeof Quagga.offDetected === 'function' && quaggaDetectedHandler){
+        Quagga.offDetected(quaggaDetectedHandler);
+        quaggaDetectedHandler = null;
+      }
       Quagga.stop();
       window.__quaggaRunning = false;
     }
@@ -509,9 +574,9 @@ function stopBarcode(){
   }catch(e){
     console.log(e);
   }
+  barcodeLookupInFlight = false;
 }
 
-}
 
 // ---------- Weight & Recalibration ----------
 function renderWeight(){
