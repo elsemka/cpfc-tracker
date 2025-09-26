@@ -443,6 +443,50 @@ let barcodeLookupInFlight = false;
 let barcodeProcessedHandler = null;
 let barcodeDetectedHandler = null;
 
+function normaliseNumber(value){
+  if(value == null) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function setFormField(selector, value){
+  const el = $(selector);
+  if(!el) return;
+  el.value = value == null ? '' : String(value);
+}
+
+function populateAddFoodFormFromProduct(product, code){
+  const nutriments = product?.nutriments || {};
+  const nameBase = product?.product_name || product?.generic_name || product?.brands || 'Продукт';
+  setFormField('#add-name', `${nameBase} (EAN ${code})`);
+
+  const kcal = normaliseNumber(
+    nutriments['energy-kcal_100g'] ??
+    nutriments['energy-kcal'] ??
+    (function(){
+      const kj = normaliseNumber(nutriments['energy-kj_100g'] ?? nutriments['energy-kj']);
+      return kj == null ? null : Math.round(kj / 4.184);
+    })()
+  );
+  const protein = normaliseNumber(nutriments['proteins_100g']);
+  const fat = normaliseNumber(nutriments['fat_100g']);
+  const carbs = normaliseNumber(nutriments['carbohydrates_100g']);
+
+  setFormField('#add-kcal', kcal != null ? Math.round(kcal) : null);
+  const round1 = v => (v == null ? null : Math.round(v * 10) / 10);
+  setFormField('#add-p', round1(protein));
+  setFormField('#add-f', round1(fat));
+  setFormField('#add-c', round1(carbs));
+}
+
+function prepareAddFoodFormForManualEntry(code){
+  setFormField('#add-name', `Продукт (EAN ${code})`);
+  setFormField('#add-kcal', null);
+  setFormField('#add-p', null);
+  setFormField('#add-f', null);
+  setFormField('#add-c', null);
+}
+
 function startBarcode(){
   if(!window.Quagga){ toast('QuaggaJS не загрузился', true); return; }
   if(quaggaRunning){ toast('Сканирование уже идёт'); return; }
@@ -482,29 +526,15 @@ function startBarcode(){
       const payload = await response.json();
       const product = payload?.status === 1 ? payload.product : null;
       if(product){
-        const nutriments = product.nutriments || {};
-        const nameBase = product.product_name || product.generic_name || product.brands || 'Продукт';
-        const formName = `${nameBase} (EAN ${code})`;
-        const setValue = (selector, value, formatter = v => v) => {
-          const el = $(selector);
-          if(!el) return;
-          const num = Number(value);
-          if(Number.isFinite(num)){
-            el.value = String(formatter(num));
-          }
-        };
-
-        $('#add-name').value = formName;
-        setValue('#add-kcal', nutriments['energy-kcal_100g'], Math.round);
-        setValue('#add-p', nutriments['proteins_100g']);
-        setValue('#add-f', nutriments['fat_100g']);
-        setValue('#add-c', nutriments['carbohydrates_100g']);
+        populateAddFoodFormFromProduct(product, code);
         toast('Данные подставлены из OpenFoodFacts');
       }else{
+        prepareAddFoodFormForManualEntry(code);
         toast('Продукт не найден в OpenFoodFacts. Введите данные вручную.');
       }
     }catch(err){
       console.error('Ошибка загрузки данных продукта', err);
+      prepareAddFoodFormForManualEntry(code);
       toast('Не удалось получить данные продукта. Попробуйте позже.', true);
     }finally{
       barcodeLookupInFlight = false;
