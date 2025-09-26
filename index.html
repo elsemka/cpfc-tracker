@@ -440,9 +440,13 @@ function parseLabelText(rawText){
 // ---------- Barcode (Quagga) ----------
 let quaggaRunning = false;
 let barcodeLookupInFlight = false;
+let barcodeProcessedHandler = null;
+let barcodeDetectedHandler = null;
 
 function startBarcode(){
   if(!window.Quagga){ toast('QuaggaJS не загрузился', true); return; }
+  if(quaggaRunning){ toast('Сканирование уже идёт'); return; }
+
   const container = document.getElementById('barcode-area');
   if(!container){ toast('Не найден контейнер камеры', true); return; }
 
@@ -452,53 +456,21 @@ function startBarcode(){
 
   // Clean container
   container.innerHTML = '';
+  container.style.boxShadow = "none";
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-  Quagga.init({
-    inputStream: {
-      type: "LiveStream",
-      target: container,                // Quagga will inject its own <video> here
-      constraints: {
-        facingMode: "environment",
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
-    },
-    locator: { patchSize: "medium", halfSample: true },
-    numOfWorkers: isIOS ? 0 : 2,        // iOS Safari needs 0
-    frequency: 10,
-    locate: true,
-    decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
-  }, function(err){
-    if (err) { console.log(err); toast('Камера недоступна: ' + err.message, true); return; }
-    Quagga.start(); 
-    window.__quaggaRunning = true;
-    toast('Сканирование запущено');
-  });
+  barcodeLookupInFlight = false;
 
-  // Visual feedback (optional)
-  Quagga.onProcessed(function(result) {
-    // Add simple overlay by toggling background if no result
+  barcodeProcessedHandler = function(result){
     if(!result || !result.boxes || result.boxes.length===0){
       container.style.boxShadow = "inset 0 0 0 2px rgba(255,255,255,.1)";
     }else{
       container.style.boxShadow = "inset 0 0 0 2px rgba(45,212,191,.4)";
     }
-  });
+  };
 
-  // Detection handler is defined elsewhere (onDetected)
-}
-
-  const videoEl = $('#barcode-video');
-  Quagga.init({
-    inputStream: { type: "LiveStream", target: videoEl, constraints:{ facingMode:"environment" } },
-    decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
-  }, function(err){
-    if (err) { console.log(err); toast('Камера недоступна', true); return; }
-    Quagga.start(); quaggaRunning = true; toast('Сканирование запущено');
-  });
-  Quagga.onDetected(async data=>{
+  barcodeDetectedHandler = async function(data){
     const code = data?.codeResult?.code;
     if(!code || barcodeLookupInFlight){ return; }
     barcodeLookupInFlight = true;
@@ -538,17 +510,64 @@ function startBarcode(){
       barcodeLookupInFlight = false;
       stopBarcode();
     }
+  };
+
+  Quagga.init({
+    inputStream: {
+      type: "LiveStream",
+      target: container,                // Quagga will inject its own <video> here
+      constraints: {
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    },
+    locator: { patchSize: "medium", halfSample: true },
+    numOfWorkers: isIOS ? 0 : 2,        // iOS Safari needs 0
+    frequency: 10,
+    locate: true,
+    decoder: { readers: ["ean_reader","ean_8_reader","upc_reader","upc_e_reader"] }
+  }, function(err){
+    if (err) {
+      console.log(err);
+      toast('Камера недоступна: ' + err.message, true);
+      barcodeProcessedHandler = null;
+      barcodeDetectedHandler = null;
+      return;
+    }
+
+    Quagga.onProcessed(barcodeProcessedHandler);
+    Quagga.onDetected(barcodeDetectedHandler);
+
+    Quagga.start();
+    quaggaRunning = true;
+    window.__quaggaRunning = true;
+    toast('Сканирование запущено');
   });
 }
 
 function stopBarcode(){
+  if(barcodeLookupInFlight){
+    toast('Ждём данные продукта...', true);
+    return;
+  }
+
   try{
-    if(window.Quagga && window.__quaggaRunning){
-      Quagga.offProcessed && Quagga.offProcessed();
-      Quagga.offDetected && Quagga.offDetected();
+    if(window.Quagga && quaggaRunning){
+      if(barcodeProcessedHandler){
+        Quagga.offProcessed && Quagga.offProcessed(barcodeProcessedHandler);
+      }
+      if(barcodeDetectedHandler){
+        Quagga.offDetected && Quagga.offDetected(barcodeDetectedHandler);
+      }
+      barcodeProcessedHandler = null;
+      barcodeDetectedHandler = null;
+
       Quagga.stop();
+      quaggaRunning = false;
       window.__quaggaRunning = false;
     }
+    barcodeLookupInFlight = false;
     const container = document.getElementById('barcode-area');
     if(container) container.style.boxShadow = "none";
     toast('Сканирование остановлено');
