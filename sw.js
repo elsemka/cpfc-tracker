@@ -1,13 +1,15 @@
 const CACHE_NAME = 'eato-v2';
-const SCOPE_URL = self.registration.scope;
-const ROOT_URL = new URL('./', SCOPE_URL).href;
-const INDEX_URL = new URL('index.html', SCOPE_URL).href;
-const OFFLINE_URL = new URL('offline.html', SCOPE_URL).href;
+const scope = new URL(self.registration.scope);
+const INDEX_URL = new URL('index.html', scope).href;
+const OFFLINE_URL = new URL('offline.html', scope).href;
 
+const STATIC_SCOPE_REQUESTS = [
+  new Request(INDEX_URL),
+  new Request(OFFLINE_URL)
+];
+const OFFLINE_FALLBACK_REQUEST = STATIC_SCOPE_REQUESTS[1];
 const STATIC_ASSETS = [
-  ROOT_URL,
-  INDEX_URL,
-  OFFLINE_URL,
+  ...STATIC_SCOPE_REQUESTS,
   'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js',
   'https://unpkg.com/quagga@0.12.1/dist/quagga.min.js'
 ];
@@ -33,11 +35,11 @@ self.addEventListener('fetch', event => {
   const requestURL = new URL(event.request.url);
   const isSameOrigin = requestURL.origin === self.location.origin;
   const isStaticAsset = STATIC_ASSETS.some(asset => {
+    const assetURL = asset instanceof Request ? asset.url : asset;
     try {
-      const assetURL = new URL(asset, self.location.origin);
-      return assetURL.href === requestURL.href;
+      return new URL(assetURL).href === requestURL.href;
     } catch (err) {
-      return asset === event.request.url;
+      return assetURL === event.request.url;
     }
   });
 
@@ -70,7 +72,7 @@ self.addEventListener('fetch', event => {
           return match;
         }
         if (event.request.mode === 'navigate') {
-          return caches.match(OFFLINE_URL);
+          return caches.match(OFFLINE_FALLBACK_REQUEST);
         }
         return Response.error();
       });
