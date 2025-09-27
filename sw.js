@@ -3,13 +3,9 @@ const scope = new URL(self.registration.scope);
 const INDEX_URL = new URL('index.html', scope).href;
 const OFFLINE_URL = new URL('offline.html', scope).href;
 
-const STATIC_SCOPE_REQUESTS = [
-  new Request(INDEX_URL),
-  new Request(OFFLINE_URL)
-];
-const OFFLINE_FALLBACK_REQUEST = STATIC_SCOPE_REQUESTS[1];
 const STATIC_ASSETS = [
-  ...STATIC_SCOPE_REQUESTS,
+  INDEX_URL,
+  OFFLINE_URL,
   'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js',
   'https://unpkg.com/quagga@0.12.1/dist/quagga.min.js'
 ];
@@ -72,7 +68,7 @@ self.addEventListener('fetch', event => {
           return match;
         }
         if (event.request.mode === 'navigate') {
-          return caches.match(OFFLINE_FALLBACK_REQUEST);
+          return caches.match(OFFLINE_URL);
         }
         return Response.error();
       });
