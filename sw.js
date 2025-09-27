@@ -1,9 +1,13 @@
 const CACHE_NAME = 'eato-v2';
+const SCOPE_URL = self.registration.scope;
+const ROOT_URL = new URL('./', SCOPE_URL).href;
+const INDEX_URL = new URL('index.html', SCOPE_URL).href;
+const OFFLINE_URL = new URL('offline.html', SCOPE_URL).href;
+
 const STATIC_ASSETS = [
-  './',
-  '/',
-  '/index.html',
-  '/offline.html',
+  ROOT_URL,
+  INDEX_URL,
+  OFFLINE_URL,
   'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js',
   'https://unpkg.com/quagga@0.12.1/dist/quagga.min.js'
 ];
@@ -66,7 +70,7 @@ self.addEventListener('fetch', event => {
           return match;
         }
         if (event.request.mode === 'navigate') {
-          return caches.match('/offline.html');
+          return caches.match(OFFLINE_URL);
         }
         return Response.error();
       });
